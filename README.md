@@ -7,7 +7,10 @@ A tiny Android app that reminds you to exercise at an interval you choose.
 - Each round a notification appears; tapping it opens the app.
 - Tap an exercise, enter reps, and it turns green and shows "Done".
 - When every exercise is done, the countdown to the next round restarts.
-- If you ignore a round, reminders keep coming on schedule.
+- Reminders are one-shot: after a notification fires, no new reminder is scheduled until
+  you finish the round (or press Stop, then Start).
+- The **History** tab shows a month calendar; tap a day to see each session with its
+  exercises and reps.
 
 ## Get the .apk
 
