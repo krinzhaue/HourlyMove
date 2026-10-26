@@ -4,7 +4,10 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
-/** Fires when a round is due: starts a fresh round, queues the next alarm, shows the notification. */
+/**
+ * Fires when a round is due: starts a fresh round and shows the notification.
+ * It does NOT schedule another alarm; the next countdown only starts once you finish the round.
+ */
 public class AlarmReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -13,13 +16,12 @@ public class AlarmReceiver extends BroadcastReceiver {
             return;
         }
 
-        // New round: everything is "not done" again.
+        // New round: everything is "not done" again, and it is a new history session.
         store.clearDone();
+        store.newSession();
 
-        // Keep reminders coming even if this round is ignored.
-        long next = System.currentTimeMillis() + store.intervalMin() * 60_000L;
-        store.setNext(next);
-        Scheduler.schedule(context, next);
+        // 0 = no countdown running; waiting for you to finish this round.
+        store.setNext(0L);
 
         Notifier.show(context, store);
     }
