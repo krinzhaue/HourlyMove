@@ -15,6 +15,19 @@ import java.util.Map;
 /** Tiny wrapper around SharedPreferences: exercise list, interval, timer, progress and history. */
 class Store {
 
+    /** An exercise in your list, with its plan (sets x reps per set). */
+    static class Exercise {
+        final String name;
+        final int sets;
+        final int reps;
+
+        Exercise(String name, int sets, int reps) {
+            this.name = name;
+            this.sets = sets;
+            this.reps = reps;
+        }
+    }
+
     /** One logged exercise in the history. */
     static class Entry {
         final long time;     // epoch millis when first logged
@@ -38,20 +51,67 @@ class Store {
 
     // ---- exercise list ----
 
-    List<String> exercises() {
-        List<String> out = new ArrayList<>();
+    /** Reads the list. Exercises saved by older versions (plain names) get 3 sets x 12 reps. */
+    List<Exercise> exercises() {
+        List<Exercise> out = new ArrayList<>();
         try {
             JSONArray a = new JSONArray(p.getString("exercises", "[]"));
             for (int i = 0; i < a.length(); i++) {
-                out.add(a.getString(i));
+                Object o = a.get(i);
+                if (o instanceof JSONObject) {
+                    JSONObject j = (JSONObject) o;
+                    out.add(new Exercise(j.getString("n"), j.optInt("s", 3), j.optInt("r", 12)));
+                } else {
+                    out.add(new Exercise(String.valueOf(o), 3, 12));
+                }
             }
         } catch (Exception ignored) {
         }
         return out;
     }
 
-    void setExercises(List<String> list) {
-        p.edit().putString("exercises", new JSONArray(list).toString()).apply();
+    void setExercises(List<Exercise> list) {
+        JSONArray a = new JSONArray();
+        try {
+            for (Exercise e : list) {
+                JSONObject o = new JSONObject();
+                o.put("n", e.name);
+                o.put("s", e.sets);
+                o.put("r", e.reps);
+                a.put(o);
+            }
+        } catch (Exception ignored) {
+        }
+        p.edit().putString("exercises", a.toString()).apply();
+    }
+
+    /** Keeps the current round (done state and its history entries) attached to a renamed exercise. */
+    void renameExercise(String oldName, String newName) {
+        if (oldName.equals(newName)) {
+            return;
+        }
+        Map<String, Integer> m = done();
+        if (m.containsKey(oldName)) {
+            Integer reps = m.remove(oldName);
+            m.put(newName, reps);
+            saveDone(m);
+        }
+        try {
+            JSONArray a = new JSONArray(p.getString("log", "[]"));
+            long sid = sessionId();
+            boolean changed = false;
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                if (o.getLong("s") == sid && o.getString("n").equals(oldName)) {
+                    o.put("n", newName);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                p.edit().putString("log", a.toString()).apply();
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     // ---- progress in the current round (exercise name -> reps) ----
@@ -137,6 +197,47 @@ class Store {
             a.put(o);
             p.edit().putString("log", a.toString()).apply();
         } catch (Exception ignored) {
+        }
+    }
+
+    /** Changes the reps of a logged exercise. If it belongs to the current round, that round follows. */
+    void setEntryReps(long session, String name, int reps) {
+        try {
+            JSONArray a = new JSONArray(p.getString("log", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                if (o.getLong("s") == session && o.getString("n").equals(name)) {
+                    o.put("r", reps);
+                }
+            }
+            p.edit().putString("log", a.toString()).apply();
+        } catch (Exception ignored) {
+        }
+        if (session == sessionId()) {
+            Map<String, Integer> m = done();
+            if (m.containsKey(name)) {
+                m.put(name, reps);
+                saveDone(m);
+            }
+        }
+    }
+
+    /** Removes a logged exercise from the history. In the current round it becomes "not done" again. */
+    void deleteEntry(long session, String name) {
+        try {
+            JSONArray a = new JSONArray(p.getString("log", "[]"));
+            JSONArray kept = new JSONArray();
+            for (int i = 0; i < a.length(); i++) {
+                JSONObject o = a.getJSONObject(i);
+                if (!(o.getLong("s") == session && o.getString("n").equals(name))) {
+                    kept.put(o);
+                }
+            }
+            p.edit().putString("log", kept.toString()).apply();
+        } catch (Exception ignored) {
+        }
+        if (session == sessionId()) {
+            removeDone(name);
         }
     }
 

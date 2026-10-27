@@ -20,6 +20,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
@@ -50,17 +51,24 @@ public class MainActivity extends Activity {
 
     // ---- palette ----
     private static final int BG = 0xFF000000;
-    private static final int SURFACE = 0xFF1A1A1A;
+    private static final int SURFACE = 0xFF1B1E15;
     private static final int SURFACE_DONE = 0xFF222E10;
+    private static final int ICON_BG = 0xFF2A3015;
     private static final int LIME = 0xFFA9CC3C;
     private static final int LIME_DARK = 0xFF3D4D15;
     private static final int ON_LIME = 0xFF11140A;
     private static final int TEXT = 0xFFEDEDED;
     private static final int TEXT_DIM = 0xFF9E9E9E;
     private static final int TRACK = 0xFF2B2D28;
+    private static final int FIELD = 0xFF2C2C2C;
 
     private Store store;
     private final Handler handler = new Handler(Looper.getMainLooper());
+
+    /** A dialog action that returns true when it succeeded and the dialog may close. */
+    private interface Check {
+        boolean run();
+    }
 
     // tabs
     private ScrollView todayView;
@@ -75,7 +83,6 @@ public class MainActivity extends Activity {
     private TextView subtitle;
     private TextView roundInfo;
     private EditText intervalInput;
-    private EditText newExercise;
     private PillButton toggle;
     private LinearLayout list;
     private long shownSession = -1;
@@ -440,27 +447,25 @@ public class MainActivity extends Activity {
         header.setTextSize(18);
         header.setTextColor(TEXT);
         header.setTypeface(Typeface.DEFAULT_BOLD);
-        header.setPadding(0, dp(28), 0, dp(10));
+        header.setPadding(0, dp(28), 0, dp(4));
         root.addView(header, matchWrap());
+
+        TextView hint = new TextView(this);
+        hint.setText("Tap to log · long-press to edit · drag ≡ to reorder");
+        hint.setTextSize(13);
+        hint.setTextColor(TEXT_DIM);
+        hint.setPadding(0, 0, 0, dp(10));
+        root.addView(hint, matchWrap());
 
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         root.addView(list, matchWrap());
 
         // Add exercise
-        newExercise = new EditText(this);
-        newExercise.setHint("New exercise (e.g. Push-ups)");
-        newExercise.setSingleLine(true);
-        newExercise.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        styleField(newExercise, SURFACE);
-        LinearLayout.LayoutParams nlp = matchWrap();
-        nlp.topMargin = dp(8);
-        root.addView(newExercise, nlp);
-
         PillButton add = new PillButton(this, "Add exercise", R.drawable.ic_add, false);
-        add.setOnClickListener(v -> addExercise());
+        add.setOnClickListener(v -> showExerciseDialog(null));
         LinearLayout.LayoutParams alp = matchWrap();
-        alp.topMargin = dp(12);
+        alp.topMargin = dp(8);
         root.addView(add, alp);
 
         return scroll;
@@ -471,59 +476,210 @@ public class MainActivity extends Activity {
         toggle.setLabel(store.enabled() ? "Stop reminders" : "Start reminders");
 
         list.removeAllViews();
-        List<String> exercises = store.exercises();
+        List<Store.Exercise> exercises = store.exercises();
         Map<String, Integer> done = store.done();
 
         if (exercises.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("No exercises yet. Add one below.");
+            empty.setText("No exercises yet. Tap Add exercise.");
             empty.setTextSize(16);
             empty.setTextColor(TEXT_DIM);
+            empty.setPadding(0, 0, 0, dp(10));
             list.addView(empty, matchWrap());
         }
 
-        for (final String name : exercises) {
-            Integer reps = done.get(name);
-
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setBackground(rippleBg(density(), reps != null ? SURFACE_DONE : SURFACE, 20, 0x22FFFFFF));
-            row.setPadding(dp(16), dp(2), dp(4), dp(2));
-            row.setClickable(true);
-            row.setOnClickListener(v -> askReps(name));
-
-            TextView nameView = new TextView(this);
-            nameView.setText(name);
-            nameView.setTextSize(18);
-            nameView.setTextColor(TEXT);
-            nameView.setPadding(0, dp(14), dp(8), dp(14));
-            row.addView(nameView, new LinearLayout.LayoutParams(0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-            TextView status = new TextView(this);
-            if (reps != null) {
-                status.setText("✓ Done · " + reps + " reps");
-                status.setTextColor(LIME);
-                status.setTypeface(Typeface.DEFAULT_BOLD);
-            } else {
-                status.setText("Tap to log");
-                status.setTextColor(TEXT_DIM);
-            }
-            status.setTextSize(14);
-            row.addView(status);
-
-            TextView remove = new TextView(this);
-            remove.setText("✕");
-            remove.setTextSize(18);
-            remove.setTextColor(TEXT_DIM);
-            remove.setPadding(dp(14), dp(14), dp(14), dp(14));
-            remove.setOnClickListener(v -> confirmRemove(name));
-            row.addView(remove);
-
+        for (int i = 0; i < exercises.size(); i++) {
+            Store.Exercise ex = exercises.get(i);
             LinearLayout.LayoutParams lp = matchWrap();
-            lp.bottomMargin = dp(8);
-            list.addView(row, lp);
+            lp.bottomMargin = dp(10);
+            list.addView(buildExerciseRow(ex, done.get(ex.name), i), lp);
+        }
+    }
+
+    /** One exercise card: round icon, name with "3 sets - 12 reps", drag handle and trash. */
+    private View buildExerciseRow(final Store.Exercise ex, Integer reps, final int index) {
+        final LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setBackground(rippleBg(density(), reps != null ? SURFACE_DONE : SURFACE, 28, 0x22FFFFFF));
+        row.setPadding(dp(12), dp(12), dp(6), dp(12));
+        row.setClickable(true);
+        row.setOnClickListener(v -> askReps(ex));
+        row.setOnLongClickListener(v -> {
+            showExerciseDialog(ex);
+            return true;
+        });
+
+        // Icon in a circle (filled lime once done)
+        LinearLayout circle = new LinearLayout(this);
+        circle.setGravity(Gravity.CENTER);
+        GradientDrawable oval = new GradientDrawable();
+        oval.setShape(GradientDrawable.OVAL);
+        oval.setColor(reps != null ? LIME : ICON_BG);
+        circle.setBackground(oval);
+        ImageView icon = new ImageView(this);
+        icon.setImageResource(iconFor(ex.name));
+        icon.setColorFilter(reps != null ? ON_LIME : LIME);
+        circle.addView(icon, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        row.addView(circle, new LinearLayout.LayoutParams(dp(58), dp(58)));
+
+        // Name + subtitle
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+
+        TextView nameView = new TextView(this);
+        nameView.setText(ex.name);
+        nameView.setTextSize(20);
+        nameView.setTextColor(TEXT);
+        nameView.setTypeface(Typeface.DEFAULT_BOLD);
+        col.addView(nameView, matchWrap());
+
+        TextView sub = new TextView(this);
+        sub.setTextSize(15);
+        if (reps != null) {
+            sub.setText("✓ Done · " + reps + " reps");
+            sub.setTextColor(LIME);
+            sub.setTypeface(Typeface.DEFAULT_BOLD);
+        } else {
+            sub.setText(ex.sets + (ex.sets == 1 ? " set" : " sets") + " · " + ex.reps + " reps");
+            sub.setTextColor(TEXT_DIM);
+        }
+        LinearLayout.LayoutParams sublp = matchWrap();
+        sublp.topMargin = dp(2);
+        col.addView(sub, sublp);
+
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        clp.setMarginStart(dp(16));
+        clp.setMarginEnd(dp(8));
+        row.addView(col, clp);
+
+        // Drag handle
+        ImageView handle = iconButton(R.drawable.ic_drag_handle);
+        attachDrag(handle, row, index);
+        row.addView(handle, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        // Trash
+        ImageView trash = iconButton(R.drawable.ic_delete);
+        trash.setOnClickListener(v -> confirmRemove(ex.name));
+        row.addView(trash, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+        return row;
+    }
+
+    private static int iconFor(String name) {
+        String n = name.toLowerCase(Locale.ROOT);
+        if (n.contains("push")) {
+            return R.drawable.ic_pushup;
+        }
+        if (n.contains("squat")) {
+            return R.drawable.ic_squat;
+        }
+        return R.drawable.ic_dumbbell;
+    }
+
+    private ImageView iconButton(int res) {
+        ImageView v = new ImageView(this);
+        v.setImageResource(res);
+        v.setColorFilter(0xFFB5B5B5);
+        v.setPadding(dp(10), dp(10), dp(10), dp(10));
+        v.setClickable(true);
+        return v;
+    }
+
+    // ---- drag to reorder (press and hold the handle, then move up or down) ----
+
+    private void attachDrag(final View handle, final View row, final int index) {
+        handle.setOnTouchListener(new View.OnTouchListener() {
+            private float startY;
+            private int target;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        startY = e.getRawY();
+                        target = index;
+                        row.setTranslationZ(dp(8));
+                        row.setAlpha(0.9f);
+                        v.getParent().requestDisallowInterceptTouchEvent(true);
+                        return true;
+                    case MotionEvent.ACTION_MOVE: {
+                        float dy = e.getRawY() - startY;
+                        row.setTranslationY(dy);
+                        target = dropTarget(index, dy);
+                        shiftRows(index, target);
+                        return true;
+                    }
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL: {
+                        boolean drop = e.getActionMasked() == MotionEvent.ACTION_UP && target != index;
+                        resetRows();
+                        if (drop) {
+                            List<Store.Exercise> all = store.exercises();
+                            if (index < all.size()) {
+                                Store.Exercise moved = all.remove(index);
+                                all.add(Math.min(target, all.size()), moved);
+                                store.setExercises(all);
+                            }
+                        }
+                        handler.post(() -> refresh());
+                        return true;
+                    }
+                    default:
+                        return false;
+                }
+            }
+        });
+    }
+
+    /** The position the dragged card would take if dropped now. */
+    private int dropTarget(int index, float dy) {
+        View dragged = list.getChildAt(index);
+        if (dragged == null) {
+            return index;
+        }
+        float center = dragged.getTop() + dragged.getHeight() / 2f + dy;
+        int target = 0;
+        for (int j = 0; j < list.getChildCount(); j++) {
+            if (j == index) {
+                continue;
+            }
+            View c = list.getChildAt(j);
+            if (c.getTop() + c.getHeight() / 2f < center) {
+                target++;
+            }
+        }
+        return target;
+    }
+
+    /** Slides the other cards out of the way so you can see where the dragged one will land. */
+    private void shiftRows(int index, int target) {
+        View dragged = list.getChildAt(index);
+        if (dragged == null) {
+            return;
+        }
+        float step = dragged.getHeight() + dp(10);
+        for (int j = 0; j < list.getChildCount(); j++) {
+            if (j == index) {
+                continue;
+            }
+            float t = 0f;
+            if (index < j && j <= target) {
+                t = -step;
+            } else if (target <= j && j < index) {
+                t = step;
+            }
+            list.getChildAt(j).setTranslationY(t);
+        }
+    }
+
+    private void resetRows() {
+        for (int j = 0; j < list.getChildCount(); j++) {
+            View c = list.getChildAt(j);
+            c.setTranslationY(0f);
+            c.setTranslationZ(0f);
+            c.setAlpha(1f);
         }
     }
 
@@ -538,7 +694,7 @@ public class MainActivity extends Activity {
             refresh();
         }
 
-        List<String> exercises = store.exercises();
+        List<Store.Exercise> exercises = store.exercises();
         Map<String, Integer> done = store.done();
 
         if (!store.enabled()) {
@@ -550,8 +706,8 @@ public class MainActivity extends Activity {
         }
 
         int doneCount = 0;
-        for (String e : exercises) {
-            if (done.containsKey(e)) {
+        for (Store.Exercise e : exercises) {
+            if (done.containsKey(e.name)) {
                 doneCount++;
             }
         }
@@ -588,17 +744,14 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ Today actions
 
-    private void askReps(final String name) {
+    private void askReps(final Store.Exercise ex) {
         final EditText input = new EditText(this);
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
-        input.setHint("Reps");
         input.setSingleLine(true);
-        styleField(input, 0xFF2C2C2C);
-        Integer prev = store.done().get(name);
-        if (prev != null) {
-            input.setText(String.valueOf(prev));
-            input.setSelection(input.getText().length());
-        }
+        input.setSelectAllOnFocus(true);
+        styleField(input, FIELD);
+        Integer prev = store.done().get(ex.name);
+        input.setText(String.valueOf(prev != null ? prev : ex.sets * ex.reps));
 
         LinearLayout box = new LinearLayout(this);
         box.setPadding(dp(24), dp(8), dp(24), 0);
@@ -606,38 +759,128 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle(name)
-                .setMessage("How many reps did you do?")
+                .setTitle(ex.name)
+                .setMessage("Planned: " + ex.sets + " × " + ex.reps
+                        + " reps.\nHow many reps did you do in total?")
                 .setView(box)
-                .setPositiveButton("Done", (d, w) -> {
-                    int reps;
-                    try {
-                        reps = Integer.parseInt(input.getText().toString().trim());
-                    } catch (Exception err) {
-                        reps = 0;
-                    }
-                    if (reps < 1) {
-                        Toast.makeText(this, "Enter the number of reps", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    boolean wasAll = allDone();
-                    store.markDone(name, reps);
-                    afterChange(wasAll);
-                })
+                .setPositiveButton("Done", null)
                 .setNegativeButton("Cancel", null)
                 .create();
-        dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
-        dialog.show();
+        showValidated(dialog, true, () -> {
+            int reps = parseInt(input);
+            if (reps < 1) {
+                toast("Enter the number of reps");
+                return false;
+            }
+            boolean wasAll = allDone();
+            store.markDone(ex.name, reps);
+            afterChange(wasAll);
+            return true;
+        });
+    }
+
+    /** Add (existing == null) or edit an exercise: name, sets and reps per set. */
+    private void showExerciseDialog(final Store.Exercise existing) {
+        final EditText name = new EditText(this);
+        name.setHint("Exercise name (e.g. Push-ups)");
+        name.setSingleLine(true);
+        name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        styleField(name, FIELD);
+
+        final EditText sets = new EditText(this);
+        sets.setInputType(InputType.TYPE_CLASS_NUMBER);
+        sets.setSingleLine(true);
+        sets.setGravity(Gravity.CENTER);
+        sets.setSelectAllOnFocus(true);
+        styleField(sets, FIELD);
+
+        final EditText reps = new EditText(this);
+        reps.setInputType(InputType.TYPE_CLASS_NUMBER);
+        reps.setSingleLine(true);
+        reps.setGravity(Gravity.CENTER);
+        reps.setSelectAllOnFocus(true);
+        styleField(reps, FIELD);
+
+        if (existing != null) {
+            name.setText(existing.name);
+            name.setSelection(existing.name.length());
+            sets.setText(String.valueOf(existing.sets));
+            reps.setText(String.valueOf(existing.reps));
+        } else {
+            sets.setText("3");
+            reps.setText("12");
+        }
+
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(24), dp(8), dp(24), 0);
+        box.addView(name, matchWrap());
+
+        LinearLayout nums = new LinearLayout(this);
+        nums.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        left.setMarginEnd(dp(8));
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        right.setMarginStart(dp(8));
+        nums.addView(labeled("Sets", sets), left);
+        nums.addView(labeled("Reps per set", reps), right);
+        LinearLayout.LayoutParams nlp = matchWrap();
+        nlp.topMargin = dp(14);
+        box.addView(nums, nlp);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(existing == null ? "Add exercise" : "Edit exercise")
+                .setView(box)
+                .setPositiveButton(existing == null ? "Add" : "Save", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+        showValidated(dialog, true, () -> {
+            String n = name.getText().toString().trim();
+            int s = parseInt(sets);
+            int r = parseInt(reps);
+            if (n.isEmpty()) {
+                toast("Enter a name");
+                return false;
+            }
+            if (s < 1 || r < 1) {
+                toast("Sets and reps must be 1 or more");
+                return false;
+            }
+            List<Store.Exercise> all = store.exercises();
+            for (Store.Exercise other : all) {
+                boolean itself = existing != null && other.name.equals(existing.name);
+                if (!itself && other.name.equalsIgnoreCase(n)) {
+                    toast("Already in your list");
+                    return false;
+                }
+            }
+            if (existing == null) {
+                all.add(new Store.Exercise(n, s, r));
+            } else {
+                for (int i = 0; i < all.size(); i++) {
+                    if (all.get(i).name.equals(existing.name)) {
+                        all.set(i, new Store.Exercise(n, s, r));
+                    }
+                }
+                store.renameExercise(existing.name, n);
+            }
+            store.setExercises(all);
+            refresh();
+            updateCountdown();
+            return true;
+        });
     }
 
     private boolean allDone() {
-        List<String> exercises = store.exercises();
+        List<Store.Exercise> exercises = store.exercises();
         Map<String, Integer> done = store.done();
         if (exercises.isEmpty()) {
             return false;
         }
-        for (String e : exercises) {
-            if (!done.containsKey(e)) {
+        for (Store.Exercise e : exercises) {
+            if (!done.containsKey(e.name)) {
                 return false;
             }
         }
@@ -666,33 +909,14 @@ public class MainActivity extends Activity {
         updateCountdown();
     }
 
-    private void addExercise() {
-        String name = newExercise.getText().toString().trim();
-        if (name.isEmpty()) {
-            return;
-        }
-        List<String> exercises = store.exercises();
-        for (String e : exercises) {
-            if (e.equalsIgnoreCase(name)) {
-                Toast.makeText(this, "Already in your list", Toast.LENGTH_SHORT).show();
-                return;
-            }
-        }
-        exercises.add(name);
-        store.setExercises(exercises);
-        newExercise.setText("");
-        refresh();
-        updateCountdown();
-    }
-
     private void confirmRemove(final String name) {
         new AlertDialog.Builder(this)
                 .setTitle("Remove \"" + name + "\"?")
                 .setMessage("Your history for it is kept.")
                 .setPositiveButton("Remove", (d, w) -> {
                     boolean wasAll = allDone();
-                    List<String> exercises = store.exercises();
-                    exercises.remove(name);
+                    List<Store.Exercise> exercises = store.exercises();
+                    exercises.removeIf(e -> e.name.equals(name));
                     store.setExercises(exercises);
                     store.removeDone(name);
                     afterChange(wasAll);
@@ -703,12 +927,7 @@ public class MainActivity extends Activity {
 
     /** Reads and saves the interval field. Returns false (with a message) if it is invalid. */
     private boolean applyInterval() {
-        int minutes;
-        try {
-            minutes = Integer.parseInt(intervalInput.getText().toString().trim());
-        } catch (Exception e) {
-            minutes = 0;
-        }
+        int minutes = parseInt(intervalInput);
         if (minutes < 1) {
             Toast.makeText(this, "Enter the interval in minutes (1 or more)", Toast.LENGTH_SHORT).show();
             return false;
@@ -860,8 +1079,11 @@ public class MainActivity extends Activity {
         title.setPadding(0, 0, 0, dp(10));
         dayDetails.addView(title, matchWrap());
 
-        // Group this day's entries by session, in the order they happened.
+        // Group this day's entries by session (in the order they happened) and add up the totals.
         Map<Long, List<Store.Entry>> sessions = new LinkedHashMap<>();
+        Map<String, Integer> totals = new LinkedHashMap<>();
+        int entryCount = 0;
+        int totalReps = 0;
         for (Store.Entry e : log) {
             if (!dateOf(e).equals(selectedDate)) {
                 continue;
@@ -872,6 +1094,10 @@ public class MainActivity extends Activity {
                 sessions.put(e.session, group);
             }
             group.add(e);
+            entryCount++;
+            totalReps += e.reps;
+            Integer sum = totals.get(e.name);
+            totals.put(e.name, (sum == null ? 0 : sum) + e.reps);
         }
 
         if (sessions.isEmpty()) {
@@ -883,12 +1109,36 @@ public class MainActivity extends Activity {
             return;
         }
 
+        LinearLayout.LayoutParams sumlp = matchWrap();
+        sumlp.bottomMargin = dp(20);
+        dayDetails.addView(buildSummary(sessions.size(), entryCount, totalReps, totals), sumlp);
+
+        TextView sessionsTitle = new TextView(this);
+        sessionsTitle.setText("Sessions");
+        sessionsTitle.setTextSize(16);
+        sessionsTitle.setTextColor(TEXT);
+        sessionsTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        dayDetails.addView(sessionsTitle, matchWrap());
+
+        TextView editHint = new TextView(this);
+        editHint.setText("Long-press a session to edit it");
+        editHint.setTextSize(13);
+        editHint.setTextColor(TEXT_DIM);
+        editHint.setPadding(0, dp(2), 0, dp(10));
+        dayDetails.addView(editHint, matchWrap());
+
         int n = 1;
-        for (List<Store.Entry> group : sessions.values()) {
+        for (final List<Store.Entry> group : sessions.values()) {
+            final int number = n;
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(LinearLayout.VERTICAL);
-            card.setBackground(rounded(SURFACE, 20));
+            card.setBackground(rippleBg(density(), SURFACE, 20, 0x22FFFFFF));
             card.setPadding(dp(16), dp(14), dp(16), dp(14));
+            card.setClickable(true);
+            card.setOnLongClickListener(v -> {
+                editSession(group, number);
+                return true;
+            });
 
             TextView head = new TextView(this);
             head.setText("Session " + n + " · " + timeOf(group.get(0)));
@@ -926,6 +1176,180 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** "Sessions / Exercises done / Total reps" tiles, plus total reps for each exercise. */
+    private View buildSummary(int sessionCount, int entryCount, int totalReps,
+                              Map<String, Integer> totals) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(rounded(SURFACE, 24));
+        card.setPadding(dp(8), dp(16), dp(8), dp(12));
+
+        LinearLayout tiles = new LinearLayout(this);
+        tiles.setOrientation(LinearLayout.HORIZONTAL);
+        tiles.addView(statTile(String.valueOf(sessionCount), "Sessions"),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        tiles.addView(statTile(String.valueOf(entryCount), "Exercises done"),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        tiles.addView(statTile(String.valueOf(totalReps), "Total reps"),
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        card.addView(tiles, matchWrap());
+
+        View line = new View(this);
+        line.setBackgroundColor(0xFF2E3326);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1));
+        llp.setMargins(dp(8), dp(14), dp(8), dp(6));
+        card.addView(line, llp);
+
+        for (Map.Entry<String, Integer> t : totals.entrySet()) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setPadding(dp(8), dp(6), dp(8), dp(6));
+
+            TextView name = new TextView(this);
+            name.setText(t.getKey());
+            name.setTextSize(15);
+            name.setTextColor(TEXT);
+            row.addView(name, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView reps = new TextView(this);
+            reps.setText(t.getValue() + (t.getValue() == 1 ? " rep" : " reps"));
+            reps.setTextSize(15);
+            reps.setTextColor(TEXT_DIM);
+            row.addView(reps);
+
+            card.addView(row, matchWrap());
+        }
+        return card;
+    }
+
+    private View statTile(String value, String label) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        TextView v = new TextView(this);
+        v.setText(value);
+        v.setTextSize(28);
+        v.setTextColor(LIME);
+        v.setTypeface(Typeface.DEFAULT_BOLD);
+        v.setGravity(Gravity.CENTER);
+        tile.addView(v, matchWrap());
+
+        TextView l = new TextView(this);
+        l.setText(label);
+        l.setTextSize(13);
+        l.setTextColor(TEXT_DIM);
+        l.setGravity(Gravity.CENTER);
+        tile.addView(l, matchWrap());
+        return tile;
+    }
+
+    // ---- editing a session (long-press) ----
+
+    private void editSession(final List<Store.Entry> group, int number) {
+        final List<EditText> inputs = new ArrayList<>();
+        final boolean[] removed = new boolean[group.size()];
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(24), dp(4), dp(24), 0);
+        sv.addView(box);
+
+        for (int i = 0; i < group.size(); i++) {
+            final int idx = i;
+            Store.Entry e = group.get(i);
+
+            final LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView nm = new TextView(this);
+            nm.setText(e.name);
+            nm.setTextSize(16);
+            nm.setTextColor(TEXT);
+            row.addView(nm, new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            EditText reps = new EditText(this);
+            reps.setInputType(InputType.TYPE_CLASS_NUMBER);
+            reps.setSingleLine(true);
+            reps.setGravity(Gravity.CENTER);
+            reps.setSelectAllOnFocus(true);
+            reps.setText(String.valueOf(e.reps));
+            styleField(reps, FIELD);
+            row.addView(reps, new LinearLayout.LayoutParams(dp(84),
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+            inputs.add(reps);
+
+            ImageView del = iconButton(R.drawable.ic_delete);
+            del.setOnClickListener(v -> {
+                removed[idx] = true;
+                row.setVisibility(View.GONE);
+            });
+            row.addView(del, new LinearLayout.LayoutParams(dp(44), dp(44)));
+
+            LinearLayout.LayoutParams lp = matchWrap();
+            lp.topMargin = dp(6);
+            box.addView(row, lp);
+        }
+
+        final AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Edit session " + number + " · " + timeOf(group.get(0)))
+                .setView(sv)
+                .setPositiveButton("Save", null)
+                .setNegativeButton("Cancel", null)
+                .setNeutralButton("Delete", null)
+                .create();
+        showValidated(dialog, false, () -> {
+            int[] values = new int[group.size()];
+            for (int i = 0; i < group.size(); i++) {
+                if (removed[i]) {
+                    continue;
+                }
+                values[i] = parseInt(inputs.get(i));
+                if (values[i] < 1) {
+                    toast("Reps must be 1 or more");
+                    return false;
+                }
+            }
+            for (int i = 0; i < group.size(); i++) {
+                Store.Entry entry = group.get(i);
+                if (removed[i]) {
+                    store.deleteEntry(entry.session, entry.name);
+                } else if (values[i] != entry.reps) {
+                    store.setEntryReps(entry.session, entry.name, values[i]);
+                }
+            }
+            renderHistory();
+            refresh();
+            updateCountdown();
+            return true;
+        });
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(0xFFE57373);
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL)
+                .setOnClickListener(v -> confirmDeleteSession(group, dialog));
+    }
+
+    private void confirmDeleteSession(final List<Store.Entry> group, final AlertDialog parent) {
+        new AlertDialog.Builder(this)
+                .setTitle("Delete this session?")
+                .setMessage("It will be removed from your history.")
+                .setPositiveButton("Delete", (d, w) -> {
+                    for (Store.Entry e : group) {
+                        store.deleteEntry(e.session, e.name);
+                    }
+                    parent.dismiss();
+                    renderHistory();
+                    refresh();
+                    updateCountdown();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     private static LocalDate dateOf(Store.Entry e) {
         return Instant.ofEpochMilli(e.time).atZone(ZoneId.systemDefault()).toLocalDate();
     }
@@ -936,6 +1360,47 @@ public class MainActivity extends Activity {
     }
 
     // ------------------------------------------------------------ helpers
+
+    /**
+     * Shows a dialog whose Save/Done button only closes it when the check succeeds, so a bad
+     * value keeps the dialog open instead of throwing your input away.
+     */
+    private void showValidated(final AlertDialog dialog, boolean keyboard, final Check check) {
+        if (keyboard) {
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        }
+        dialog.show();
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            if (check.run()) {
+                dialog.dismiss();
+            }
+        });
+    }
+
+    private LinearLayout labeled(String label, EditText field) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        TextView t = new TextView(this);
+        t.setText(label);
+        t.setTextSize(13);
+        t.setTextColor(TEXT_DIM);
+        t.setPadding(dp(4), 0, 0, dp(4));
+        box.addView(t, matchWrap());
+        box.addView(field, matchWrap());
+        return box;
+    }
+
+    private static int parseInt(EditText e) {
+        try {
+            return Integer.parseInt(e.getText().toString().trim());
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    private void toast(String msg) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+    }
 
     private static String format(long millis) {
         long total = (millis + 999) / 1000;
