@@ -496,7 +496,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** One exercise card: round icon, name with "3 sets - 12 reps", drag handle and trash. */
+    /** One exercise card: round icon, name with its reps, drag handle and trash. */
     private View buildExerciseRow(final Store.Exercise ex, Integer reps, final int index) {
         final LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -541,7 +541,7 @@ public class MainActivity extends Activity {
             sub.setTextColor(LIME);
             sub.setTypeface(Typeface.DEFAULT_BOLD);
         } else {
-            sub.setText(ex.sets + (ex.sets == 1 ? " set" : " sets") + " · " + ex.reps + " reps");
+            sub.setText(ex.reps + (ex.reps == 1 ? " rep" : " reps"));
             sub.setTextColor(TEXT_DIM);
         }
         LinearLayout.LayoutParams sublp = matchWrap();
@@ -751,7 +751,7 @@ public class MainActivity extends Activity {
         input.setSelectAllOnFocus(true);
         styleField(input, FIELD);
         Integer prev = store.done().get(ex.name);
-        input.setText(String.valueOf(prev != null ? prev : ex.sets * ex.reps));
+        input.setText(String.valueOf(prev != null ? prev : ex.reps));
 
         LinearLayout box = new LinearLayout(this);
         box.setPadding(dp(24), dp(8), dp(24), 0);
@@ -760,8 +760,7 @@ public class MainActivity extends Activity {
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(ex.name)
-                .setMessage("Planned: " + ex.sets + " × " + ex.reps
-                        + " reps.\nHow many reps did you do in total?")
+                .setMessage("How many reps did you do?")
                 .setView(box)
                 .setPositiveButton("Done", null)
                 .setNegativeButton("Cancel", null)
@@ -779,7 +778,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    /** Add (existing == null) or edit an exercise: name, sets and reps per set. */
+    /** Add (existing == null) or edit an exercise: name and reps. */
     private void showExerciseDialog(final Store.Exercise existing) {
         final EditText name = new EditText(this);
         name.setHint("Exercise name (e.g. Push-ups)");
@@ -787,27 +786,17 @@ public class MainActivity extends Activity {
         name.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         styleField(name, FIELD);
 
-        final EditText sets = new EditText(this);
-        sets.setInputType(InputType.TYPE_CLASS_NUMBER);
-        sets.setSingleLine(true);
-        sets.setGravity(Gravity.CENTER);
-        sets.setSelectAllOnFocus(true);
-        styleField(sets, FIELD);
-
         final EditText reps = new EditText(this);
         reps.setInputType(InputType.TYPE_CLASS_NUMBER);
         reps.setSingleLine(true);
-        reps.setGravity(Gravity.CENTER);
         reps.setSelectAllOnFocus(true);
         styleField(reps, FIELD);
 
         if (existing != null) {
             name.setText(existing.name);
             name.setSelection(existing.name.length());
-            sets.setText(String.valueOf(existing.sets));
             reps.setText(String.valueOf(existing.reps));
         } else {
-            sets.setText("3");
             reps.setText("12");
         }
 
@@ -816,19 +805,9 @@ public class MainActivity extends Activity {
         box.setPadding(dp(24), dp(8), dp(24), 0);
         box.addView(name, matchWrap());
 
-        LinearLayout nums = new LinearLayout(this);
-        nums.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        left.setMarginEnd(dp(8));
-        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        right.setMarginStart(dp(8));
-        nums.addView(labeled("Sets", sets), left);
-        nums.addView(labeled("Reps per set", reps), right);
         LinearLayout.LayoutParams nlp = matchWrap();
         nlp.topMargin = dp(14);
-        box.addView(nums, nlp);
+        box.addView(labeled("Reps", reps), nlp);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle(existing == null ? "Add exercise" : "Edit exercise")
@@ -838,14 +817,13 @@ public class MainActivity extends Activity {
                 .create();
         showValidated(dialog, true, () -> {
             String n = name.getText().toString().trim();
-            int s = parseInt(sets);
             int r = parseInt(reps);
             if (n.isEmpty()) {
                 toast("Enter a name");
                 return false;
             }
-            if (s < 1 || r < 1) {
-                toast("Sets and reps must be 1 or more");
+            if (r < 1) {
+                toast("Reps must be 1 or more");
                 return false;
             }
             List<Store.Exercise> all = store.exercises();
@@ -857,11 +835,11 @@ public class MainActivity extends Activity {
                 }
             }
             if (existing == null) {
-                all.add(new Store.Exercise(n, s, r));
+                all.add(new Store.Exercise(n, r));
             } else {
                 for (int i = 0; i < all.size(); i++) {
                     if (all.get(i).name.equals(existing.name)) {
-                        all.set(i, new Store.Exercise(n, s, r));
+                        all.set(i, new Store.Exercise(n, r));
                     }
                 }
                 store.renameExercise(existing.name, n);

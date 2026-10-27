@@ -15,15 +15,13 @@ import java.util.Map;
 /** Tiny wrapper around SharedPreferences: exercise list, interval, timer, progress and history. */
 class Store {
 
-    /** An exercise in your list, with its plan (sets x reps per set). */
+    /** An exercise in your list, with its target number of reps. */
     static class Exercise {
         final String name;
-        final int sets;
         final int reps;
 
-        Exercise(String name, int sets, int reps) {
+        Exercise(String name, int reps) {
             this.name = name;
-            this.sets = sets;
             this.reps = reps;
         }
     }
@@ -51,7 +49,7 @@ class Store {
 
     // ---- exercise list ----
 
-    /** Reads the list. Exercises saved by older versions (plain names) get 3 sets x 12 reps. */
+    /** Reads the list. Exercises saved by older versions (plain names) get 12 reps. Old set counts are ignored. */
     List<Exercise> exercises() {
         List<Exercise> out = new ArrayList<>();
         try {
@@ -60,9 +58,9 @@ class Store {
                 Object o = a.get(i);
                 if (o instanceof JSONObject) {
                     JSONObject j = (JSONObject) o;
-                    out.add(new Exercise(j.getString("n"), j.optInt("s", 3), j.optInt("r", 12)));
+                    out.add(new Exercise(j.getString("n"), j.optInt("r", 12)));
                 } else {
-                    out.add(new Exercise(String.valueOf(o), 3, 12));
+                    out.add(new Exercise(String.valueOf(o), 12));
                 }
             }
         } catch (Exception ignored) {
@@ -76,7 +74,6 @@ class Store {
             for (Exercise e : list) {
                 JSONObject o = new JSONObject();
                 o.put("n", e.name);
-                o.put("s", e.sets);
                 o.put("r", e.reps);
                 a.put(o);
             }
@@ -239,6 +236,22 @@ class Store {
         if (session == sessionId()) {
             removeDone(name);
         }
+    }
+
+    /**
+     * Reps from the most recent time this exercise was logged in any session,
+     * or {@code fallback} if it has never been logged.
+     */
+    int lastReps(String name, int fallback) {
+        long bestTime = -1L;
+        int reps = fallback;
+        for (Entry e : log()) {
+            if (e.name.equals(name) && e.time > bestTime) {
+                bestTime = e.time;
+                reps = e.reps;
+            }
+        }
+        return reps;
     }
 
     // ---- settings / timer ----

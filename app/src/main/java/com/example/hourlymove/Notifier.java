@@ -35,10 +35,12 @@ final class Notifier {
         if (ex.isEmpty()) {
             text = "Open the app and add some exercises.";
         } else {
+            // "Push-ups: 36, Squats: 20" - the reps are from your last session.
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < ex.size(); i++) {
+                Store.Exercise e = ex.get(i);
                 if (i > 0) sb.append(", ");
-                sb.append(ex.get(i).name);
+                sb.append(e.name).append(": ").append(store.lastReps(e.name, e.reps));
             }
             text = sb.toString();
         }
