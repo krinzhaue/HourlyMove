@@ -30,7 +30,7 @@ final class Notifier {
     static void show(Context c, Store store) {
         ensureChannel(c);
 
-        List<String> ex = store.exercises();
+        List<Store.Exercise> ex = store.exercises();
         String text;
         if (ex.isEmpty()) {
             text = "Open the app and add some exercises.";
@@ -38,7 +38,7 @@ final class Notifier {
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < ex.size(); i++) {
                 if (i > 0) sb.append(", ");
-                sb.append(ex.get(i));
+                sb.append(ex.get(i).name);
             }
             text = sb.toString();
         }
