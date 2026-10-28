@@ -22,6 +22,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.EditText;
@@ -76,6 +77,13 @@ public class MainActivity extends Activity {
     private NavItem tabToday;
     private NavItem tabHistory;
     private int currentTab = 0;
+
+    // swipe between tabs
+    private float swipeDownX;
+    private float swipeDownY;
+    private boolean swipeTracking;
+    private boolean swiped;
+    private boolean dragging; // true while an exercise is being dragged by its handle
 
     // "Today" tab
     private RingView ring;
@@ -139,6 +147,71 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(tick);
+    }
+
+    // ------------------------------------------------------------------ swipe between tabs
+
+    /**
+     * A mostly-horizontal swipe anywhere on the screen switches tab: swipe left for History,
+     * swipe right to go back to Today. Vertical scrolling and the drag handle are not affected.
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        switch (ev.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                swipeDownX = ev.getRawX();
+                swipeDownY = ev.getRawY();
+                swipeTracking = true;
+                swiped = false;
+                dragging = false;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (swiped) {
+                    return true; // the rest of this gesture belongs to the swipe
+                }
+                if (swipeTracking && !dragging && ev.getPointerCount() == 1) {
+                    float dx = ev.getRawX() - swipeDownX;
+                    float dy = ev.getRawY() - swipeDownY;
+                    if (Math.abs(dx) > dp(72) && Math.abs(dx) > Math.abs(dy) * 2) {
+                        // Cancel whatever was under the finger (a card press, a scroll...).
+                        MotionEvent cancel = MotionEvent.obtain(ev);
+                        cancel.setAction(MotionEvent.ACTION_CANCEL);
+                        super.dispatchTouchEvent(cancel);
+                        cancel.recycle();
+                        swiped = true;
+                        if (dx < 0 && currentTab == 0) {
+                            swipeTo(1, true);
+                        } else if (dx > 0 && currentTab == 1) {
+                            swipeTo(0, false);
+                        }
+                        return true;
+                    }
+                }
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                swipeTracking = false;
+                if (swiped) {
+                    swiped = false;
+                    return true;
+                }
+                break;
+            default:
+                break;
+        }
+        return super.dispatchTouchEvent(ev);
+    }
+
+    /** Switches tab with a short slide-and-fade; the new page comes in from the right or the left. */
+    private void swipeTo(int index, boolean fromRight) {
+        if (index == currentTab) {
+            return;
+        }
+        showTab(index);
+        View page = index == 0 ? todayView : historyView;
+        page.setAlpha(0f);
+        page.setTranslationX(fromRight ? dp(48) : -dp(48));
+        page.animate().alpha(1f).translationX(0f).setDuration(180).start();
     }
 
     // ------------------------------------------------------------------ custom views
@@ -270,12 +343,106 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ UI shell + tabs
 
+    /** A container that turns a clear sideways swipe into a tab change. */
+    private static class SwipeFrame extends FrameLayout {
+        interface Listener {
+            /** @param toLeft true when the finger moved left (go to the next tab). */
+            void onSwipe(boolean toLeft);
+        }
+
+        private final Listener listener;
+        private final int slop;
+        private final int distance;
+        private float downX;
+        private float downY;
+        private boolean swiping;
+
+        SwipeFrame(Context c, Listener l) {
+            super(c);
+            listener = l;
+            slop = ViewConfiguration.get(c).getScaledTouchSlop();
+            distance = (int) (72 * c.getResources().getDisplayMetrics().density);
+        }
+
+        /** Mostly sideways movement, so normal up/down scrolling is left alone. */
+        private boolean isSideways(MotionEvent e) {
+            float dx = e.getX() - downX;
+            float dy = e.getY() - downY;
+            return Math.abs(dx) > slop * 2 && Math.abs(dx) > Math.abs(dy) * 2;
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getX();
+                    downY = e.getY();
+                    swiping = false;
+                    break;
+                case MotionEvent.ACTION_MOVE:
+                    if (isSideways(e)) {
+                        swiping = true;
+                        return true;
+                    }
+                    break;
+                default:
+                    break;
+            }
+            return false;
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getX();
+                    downY = e.getY();
+                    swiping = false;
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    if (isSideways(e)) {
+                        swiping = true;
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP: {
+                    float dx = e.getX() - downX;
+                    boolean go = swiping && Math.abs(dx) > distance;
+                    swiping = false;
+                    if (go) {
+                        listener.onSwipe(dx < 0);
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_CANCEL:
+                    swiping = false;
+                    return true;
+                default:
+                    return super.onTouchEvent(e);
+            }
+        }
+    }
+
+    /** Switches tab after a swipe: Today is on the left, History on the right. */
+    private void swipeTo(int index, boolean toLeft) {
+        showTab(index);
+        View v = index == 0 ? todayView : historyView;
+        v.animate().cancel();
+        v.setTranslationX((toLeft ? 1 : -1) * dp(48));
+        v.setAlpha(0f);
+        v.animate().translationX(0f).alpha(1f).setDuration(180).start();
+    }
+
     private void buildUi() {
         LinearLayout frame = new LinearLayout(this);
         frame.setOrientation(LinearLayout.VERTICAL);
         frame.setBackgroundColor(BG);
 
-        FrameLayout content = new FrameLayout(this);
+        SwipeFrame content = new SwipeFrame(this, toLeft -> {
+            int target = toLeft ? 1 : 0;
+            if (target != currentTab) {
+                swipeTo(target, toLeft);
+            }
+        });
         todayView = buildToday();
         historyView = buildHistory();
         content.addView(todayView, new FrameLayout.LayoutParams(
@@ -598,6 +765,7 @@ public class MainActivity extends Activity {
             public boolean onTouch(View v, MotionEvent e) {
                 switch (e.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
+                        dragging = true;
                         startY = e.getRawY();
                         target = index;
                         row.setTranslationZ(dp(8));
@@ -613,6 +781,7 @@ public class MainActivity extends Activity {
                     }
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL: {
+                        dragging = false;
                         boolean drop = e.getActionMasked() == MotionEvent.ACTION_UP && target != index;
                         resetRows();
                         if (drop) {
