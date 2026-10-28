@@ -78,13 +78,6 @@ public class MainActivity extends Activity {
     private NavItem tabHistory;
     private int currentTab = 0;
 
-    // swipe between tabs
-    private float swipeDownX;
-    private float swipeDownY;
-    private boolean swipeTracking;
-    private boolean swiped;
-    private boolean dragging; // true while an exercise is being dragged by its handle
-
     // "Today" tab
     private RingView ring;
     private TextView countdown;
@@ -147,71 +140,6 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         handler.removeCallbacks(tick);
-    }
-
-    // ------------------------------------------------------------------ swipe between tabs
-
-    /**
-     * A mostly-horizontal swipe anywhere on the screen switches tab: swipe left for History,
-     * swipe right to go back to Today. Vertical scrolling and the drag handle are not affected.
-     */
-    @Override
-    public boolean dispatchTouchEvent(MotionEvent ev) {
-        switch (ev.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                swipeDownX = ev.getRawX();
-                swipeDownY = ev.getRawY();
-                swipeTracking = true;
-                swiped = false;
-                dragging = false;
-                break;
-            case MotionEvent.ACTION_MOVE:
-                if (swiped) {
-                    return true; // the rest of this gesture belongs to the swipe
-                }
-                if (swipeTracking && !dragging && ev.getPointerCount() == 1) {
-                    float dx = ev.getRawX() - swipeDownX;
-                    float dy = ev.getRawY() - swipeDownY;
-                    if (Math.abs(dx) > dp(72) && Math.abs(dx) > Math.abs(dy) * 2) {
-                        // Cancel whatever was under the finger (a card press, a scroll...).
-                        MotionEvent cancel = MotionEvent.obtain(ev);
-                        cancel.setAction(MotionEvent.ACTION_CANCEL);
-                        super.dispatchTouchEvent(cancel);
-                        cancel.recycle();
-                        swiped = true;
-                        if (dx < 0 && currentTab == 0) {
-                            swipeTo(1, true);
-                        } else if (dx > 0 && currentTab == 1) {
-                            swipeTo(0, false);
-                        }
-                        return true;
-                    }
-                }
-                break;
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                swipeTracking = false;
-                if (swiped) {
-                    swiped = false;
-                    return true;
-                }
-                break;
-            default:
-                break;
-        }
-        return super.dispatchTouchEvent(ev);
-    }
-
-    /** Switches tab with a short slide-and-fade; the new page comes in from the right or the left. */
-    private void swipeTo(int index, boolean fromRight) {
-        if (index == currentTab) {
-            return;
-        }
-        showTab(index);
-        View page = index == 0 ? todayView : historyView;
-        page.setAlpha(0f);
-        page.setTranslationX(fromRight ? dp(48) : -dp(48));
-        page.animate().alpha(1f).translationX(0f).setDuration(180).start();
     }
 
     // ------------------------------------------------------------------ custom views
@@ -765,7 +693,6 @@ public class MainActivity extends Activity {
             public boolean onTouch(View v, MotionEvent e) {
                 switch (e.getActionMasked()) {
                     case MotionEvent.ACTION_DOWN:
-                        dragging = true;
                         startY = e.getRawY();
                         target = index;
                         row.setTranslationZ(dp(8));
@@ -781,7 +708,6 @@ public class MainActivity extends Activity {
                     }
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL: {
-                        dragging = false;
                         boolean drop = e.getActionMasked() == MotionEvent.ACTION_UP && target != index;
                         resetRows();
                         if (drop) {
@@ -920,7 +846,11 @@ public class MainActivity extends Activity {
         input.setSelectAllOnFocus(true);
         styleField(input, FIELD);
         Integer prev = store.done().get(ex.name);
-        input.setText(String.valueOf(prev != null ? prev : ex.reps));
+        input.setHint("Reps");
+        int start = prev != null ? prev : ex.reps;
+        if (start > 0) {
+            input.setText(String.valueOf(start));
+        }
 
         LinearLayout box = new LinearLayout(this);
         box.setPadding(dp(24), dp(8), dp(24), 0);
@@ -966,7 +896,7 @@ public class MainActivity extends Activity {
             name.setSelection(existing.name.length());
             reps.setText(String.valueOf(existing.reps));
         } else {
-            reps.setText("12");
+            reps.setText("0");
         }
 
         LinearLayout box = new LinearLayout(this);
@@ -989,10 +919,6 @@ public class MainActivity extends Activity {
             int r = parseInt(reps);
             if (n.isEmpty()) {
                 toast("Enter a name");
-                return false;
-            }
-            if (r < 1) {
-                toast("Reps must be 1 or more");
                 return false;
             }
             List<Store.Exercise> all = store.exercises();

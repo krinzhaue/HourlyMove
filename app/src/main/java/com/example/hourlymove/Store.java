@@ -49,7 +49,7 @@ class Store {
 
     // ---- exercise list ----
 
-    /** Reads the list. Exercises saved by older versions (plain names) get 12 reps. Old set counts are ignored. */
+    /** Reads the list. Exercises saved by older versions (plain names) get 0 reps. Old set counts are ignored. */
     List<Exercise> exercises() {
         List<Exercise> out = new ArrayList<>();
         try {
@@ -58,9 +58,9 @@ class Store {
                 Object o = a.get(i);
                 if (o instanceof JSONObject) {
                     JSONObject j = (JSONObject) o;
-                    out.add(new Exercise(j.getString("n"), j.optInt("r", 12)));
+                    out.add(new Exercise(j.getString("n"), j.optInt("r", 0)));
                 } else {
-                    out.add(new Exercise(String.valueOf(o), 12));
+                    out.add(new Exercise(String.valueOf(o), 0));
                 }
             }
         } catch (Exception ignored) {
